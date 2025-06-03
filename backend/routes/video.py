@@ -829,7 +829,7 @@ def process_video(video_id):
         # 创建视频处理任务（非预览模式）
         task_id = f"task-{uuid.uuid4().hex[:8]}"
         if not preview_mode:
-            processing_type = ",".join(processing_steps) if processing_steps else "all"
+            processing_type = "custom" if processing_steps else "all"
             task = VideoProcessingTask(
                 video_id=video.id,
                 task_id=task_id,

@@ -66,7 +66,7 @@ def process_video_task(video_id, stop_flag=None, processing_steps=None, preview_
                     video_id=video_id,
                     task_id=task_id,
                     status="processing",
-                    processing_type=",".join(processing_steps),
+                    processing_type="custom",
                     start_time=datetime.now()
                 )
                 db.session.add(task)
