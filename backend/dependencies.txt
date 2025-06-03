@@ -1,0 +1,42 @@
+# WenDao 平台后端依赖清单
+
+## 主要框架与库
+
+# Web框架
+Flask==2.2.3              # Web框架
+flask-cors==3.0.10        # 跨域资源共享
+
+# 数据库
+flask-sqlalchemy==3.0.3   # ORM框架
+PyMySQL==1.0.3            # MySQL驱动
+alembic==1.10.4           # 数据库迁移工具
+
+# 认证与安全
+PyJWT==2.6.0              # JWT生成与验证
+Werkzeug==2.2.3           # 安全工具，包括密码哈希
+
+# 文件处理
+pillow==9.5.0             # 图像处理
+python-magic==0.4.27      # 文件类型识别
+ffmpeg-python==0.2.0      # 视频处理
+
+# 数据处理
+pandas==1.5.3             # 数据分析
+numpy==1.24.3             # 科学计算
+
+# AI与大模型相关
+langchain==0.0.267         # 语言模型框架
+langchain-community==0.0.10 # 社区扩展
+langchain-openai==0.0.2    # OpenAI集成
+faiss-cpu==1.7.4           # 向量搜索库
+openai==0.28.1             # OpenAI API
+
+# 异步任务
+celery==5.3.1              # 分布式任务队列
+redis==4.5.5               # 缓存与消息代理
+
+# 其他工具
+python-dotenv==1.0.0       # 环境变量管理
+requests==2.31.0           # HTTP请求
+tqdm==4.65.0               # 进度条
+pydantic==1.10.8           # 数据验证
