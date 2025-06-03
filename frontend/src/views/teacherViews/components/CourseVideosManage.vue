@@ -539,7 +539,8 @@ const videoEdit = reactive({
 const showDeleteModal = ref(false);
 const videoToDelete = ref(null);
 
-
+// 视频处理相关
+const processingVideoId = ref(null);
 const checkingStatus = ref(false);
 
 // 批量选择相关
@@ -558,7 +559,6 @@ const processSettingsTarget = ref('single'); // 'single' 或 'batch'
 const currentProcessVideo = ref(null);
 const processPreviewMode = ref(false);
 const processSelectedSteps = ref(['keyframes', 'ocr', 'asr', 'vector', 'summary']);
-const checkingStatus = ref(false);
 const videoProcessingStatus = ref(null);
 
 // 处理步骤选项
@@ -1154,10 +1154,105 @@ const processBatchVideosWithSettings = async () => {
     textClass: 'text-success',
     message: `批量${processingType}完成，共${processingType} ${processedCount.value} 个视频`
   });
-  
-  updateProcessingStatus();
+    updateProcessingStatus();
 };
 
+// 确认批量处理
+const confirmBatchProcess = () => {
+  if (selectedVideos.value.length === 0) {
+    alert('请先选择要处理的视频');
+    return;
+  }
+  
+  // 显示处理设置对话框
+  processSettingsTarget.value = 'batch';
+  showProcessSettingsModal.value = true;
+};
+
+// 批量处理视频（简单版本）
+const batchProcessVideos = async () => {
+  showBatchProcessModal.value = false;
+  await processBatchVideosWithSettings();
+};
+
+// 确认批量删除
+const confirmBatchDelete = () => {
+  if (selectedVideos.value.length === 0) {
+    alert('请先选择要删除的视频');
+    return;
+  }
+  showBatchDeleteModal.value = true;
+};
+
+// 批量删除视频
+const batchDeleteVideos = async () => {
+  if (selectedVideos.value.length === 0) return;
+  
+  batchProcessing.value = true;
+  
+  try {
+    const deletePromises = selectedVideos.value.map(videoId => 
+      videoService.deleteVideo(videoId)
+    );
+    
+    const results = await Promise.allSettled(deletePromises);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && result.value.data?.code === 200) {
+        successCount++;
+        // 从本地列表中移除成功删除的视频
+        const videoId = selectedVideos.value[index];
+        videos.value = videos.value.filter(v => v.id !== videoId);
+      } else {
+        failCount++;
+      }
+    });
+    
+    // 更新筛选结果
+    filterVideos();
+    
+    // 清空选择
+    selectedVideos.value = [];
+    
+    // 关闭对话框
+    closeBatchDeleteDialog();
+    
+    // 显示结果
+    if (failCount === 0) {
+      alert(`成功解除 ${successCount} 个视频的关联`);
+    } else {
+      alert(`解除关联完成：成功 ${successCount} 个，失败 ${failCount} 个`);
+    }
+  } catch (error) {
+    console.error('批量解除视频关联失败:', error);
+    alert('批量解除视频关联失败: ' + (error.message || '未知错误'));
+  } finally {
+    batchProcessing.value = false;
+  }
+};
+
+// 关闭批量处理对话框
+const closeBatchProcessDialog = () => {
+  showBatchProcessModal.value = false;
+};
+
+// 关闭批量删除对话框
+const closeBatchDeleteDialog = () => {
+  showBatchDeleteModal.value = false;
+};
+
+// 关闭批量进度对话框
+const closeBatchProgressDialog = () => {
+  showBatchProgressModal.value = false;
+  // 重置状态
+  batchProgress.value = 0;
+  processedCount.value = 0;
+  processingStatus.value = [];
+  selectedVideos.value = [];
+};
 
 
 // 初始化
