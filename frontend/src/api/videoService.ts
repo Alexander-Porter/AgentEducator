@@ -61,6 +61,16 @@ export default {
     return apiClient.post(`/api/videos/${videoId}/process`);
   },
 
+  // 处理视频（带设置参数）
+  processVideoWithSettings(videoId, data) {
+    return apiClient.post(`/api/videos/${videoId}/process`, data);
+  },
+
+  // 获取视频处理状态
+  getVideoProcessingStatus(videoId) {
+    return apiClient.get(`/api/videos/${videoId}/processing-status`);
+  },
+
   // 删除评论
   deleteComment(commentId) {
     return apiClient.delete(`/api/videos/comments/${commentId}`);

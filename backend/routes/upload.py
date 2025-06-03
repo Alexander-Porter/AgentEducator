@@ -260,12 +260,32 @@ def upload_course_video():
         # 检查是否有文件部分
         if 'file' not in request.files:
             return jsonify(Result.error(400, "未找到上传文件"))
-        
-        # 获取附加参数
+          # 获取附加参数
         course_id = request.form.get('courseId')
         title = request.form.get('title')
         description = request.form.get('description', '')
-        json_sub=None
+        
+        # 获取处理步骤选择参数
+        processing_steps_str = request.form.get('processingSteps')
+        preview_mode = request.form.get('previewMode', 'false').lower() == 'true'
+        
+        # 解析处理步骤
+        processing_steps = None
+        if processing_steps_str:
+            try:
+                processing_steps = json.loads(processing_steps_str)
+                if not isinstance(processing_steps, list):
+                    return jsonify(Result.error(400, "processingSteps必须是数组格式"))
+                
+                # 验证步骤名称
+                valid_steps = ['keyframes', 'ocr', 'asr', 'vector', 'summary']
+                for step in processing_steps:
+                    if step not in valid_steps:
+                        return jsonify(Result.error(400, f"无效的处理步骤: {step}"))
+            except json.JSONDecodeError:
+                return jsonify(Result.error(400, "processingSteps格式错误"))
+        
+        json_sub = None
         
         if not all([course_id, title]):
             return jsonify(Result.error(400, "缺少必要参数"))
@@ -359,15 +379,20 @@ def upload_course_video():
         )
         
         db.session.add(video)
-        db.session.commit()
-          # 创建视频处理任务
+        db.session.commit()          # 创建视频处理任务
         try:
             task_id = f"task-{uuid.uuid4().hex[:8]}"
+            
+            # 根据preview_mode设置处理类型
+            processing_type = "preview" if preview_mode else "all"
+            if processing_steps:
+                processing_type = f"custom_{','.join(processing_steps)}"
+            
             task = VideoProcessingTask(
                 video_id=video.id,
                 task_id=task_id,
                 status="pending",
-                processing_type="all",
+                processing_type=processing_type,
                 progress=0.0,
                 start_time=datetime.now()
             )
@@ -375,11 +400,22 @@ def upload_course_video():
             db.session.commit()
             
             # 提交任务到线程池处理，不阻塞HTTP响应
-            task_id, stop_flag = video_processing_pool.submit_task(
-                current_app._get_current_object(), 
-                video.id, 
-                process_video_task
-            )
+            # 使用新的submit_task_with_params方法支持处理步骤和预览模式
+            if processing_steps is not None or preview_mode:
+                task_id, stop_flag = video_processing_pool.submit_task_with_params(
+                    current_app._get_current_object(), 
+                    video.id, 
+                    process_video_task,
+                    processing_steps=processing_steps,
+                    preview_mode=preview_mode
+                )
+            else:
+                # 向后兼容：如果没有指定新参数，使用默认处理
+                task_id, stop_flag = video_processing_pool.submit_task(
+                    current_app._get_current_object(), 
+                    video.id, 
+                    process_video_task
+                )
             
             # 更新任务ID（如果线程池生成了新的ID）
             if task.task_id != task_id:
@@ -390,8 +426,7 @@ def upload_course_video():
             # 如果创建任务失败，记录日志但不中断上传
             current_app.logger.error(f"创建视频处理任务失败: {str(e)}")
             task_id = "task-manual"
-        
-        # 返回视频信息
+          # 返回视频信息
         return jsonify(Result.success({
             "videoId": video.id,
             "videoUrl": video.video_url,
@@ -400,6 +435,8 @@ def upload_course_video():
             "duration": video.duration,
             "courseId": video.course_id,
             "processingStatus": "pending",
+            "processingSteps": processing_steps,
+            "previewMode": preview_mode,
             "uploadTime": video.upload_time.isoformat(),
             "coverUrl": os.getenv('IS_DEBUG') == 'True' and f"http://localhost:5000{video.cover_url}" or video.cover_url,
             "taskId": task_id

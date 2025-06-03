@@ -33,8 +33,7 @@
               accept="video/*,.json"
               class="mb-4"
             ></v-file-input>
-            
-            <!-- 显示匹配结果 -->
+              <!-- 显示匹配结果 -->
             <div v-if="allFiles.length" class="selected-files mb-4">
               <v-card variant="outlined" class="pa-3">
                 <v-card-subtitle>文件匹配情况</v-card-subtitle>
@@ -51,6 +50,55 @@
                     <v-icon color="warning" class="mr-2">mdi-alert</v-icon>
                     <span class="text-body-2 text-warning">未找到匹配的字幕文件</span>
                   </div>
+                </div>
+              </v-card>
+            </div>
+
+            <!-- 处理设置 -->
+            <div v-if="allFiles.length" class="processing-settings mb-4">
+              <v-card variant="outlined" class="pa-4">
+                <v-card-subtitle class="pa-0 mb-3">视频处理设置</v-card-subtitle>
+                
+                <!-- 预览模式开关 -->
+                <div class="mb-4">
+                  <v-switch
+                    v-model="previewMode"
+                    color="primary"
+                    label="预览模式"
+                    hint="预览模式下将执行所有处理步骤但不保存到数据库，仅生成处理日志"
+                    persistent-hint
+                  ></v-switch>
+                </div>
+
+                <!-- 处理步骤选择 -->
+                <div class="mb-4">
+                  <v-card-subtitle class="pa-0 mb-2">选择处理步骤</v-card-subtitle>
+                  <v-checkbox-group v-model="selectedSteps" column>
+                    <v-checkbox
+                      v-for="step in processingSteps"
+                      :key="step.value"
+                      :value="step.value"
+                      :label="step.label"
+                      :disabled="previewMode"
+                      density="compact"
+                    >
+                      <template v-slot:label>
+                        <div class="d-flex align-center">
+                          <v-icon :icon="step.icon" class="mr-2" size="small"></v-icon>
+                          <span>{{ step.label }}</span>
+                          <v-tooltip activator="parent" location="top">
+                            {{ step.description }}
+                          </v-tooltip>
+                        </div>
+                      </template>
+                    </v-checkbox>
+                  </v-checkbox-group>
+                  <v-card-text class="pa-0 text-caption text-medium-emphasis" v-if="!previewMode">
+                    * 未选择步骤将跳过处理。已处理的步骤可以重新执行以更新数据。
+                  </v-card-text>
+                  <v-card-text class="pa-0 text-caption text-medium-emphasis" v-else>
+                    * 预览模式下将执行所有步骤
+                  </v-card-text>
                 </div>
               </v-card>
             </div>
@@ -97,13 +145,50 @@ import uploadService from '../../api/uploadService';
 
 export default {
   name: 'VideosUpload',
-  setup() {
-    const route = useRoute();
+  setup() {    const route = useRoute();
     const courses = ref([]);
     const selectedCourseId = ref(null);
     const allFiles = ref([]);
     const uploading = ref(false);
     const uploadProgress = ref(0);
+    
+    // 处理设置相关状态
+    const previewMode = ref(false);
+    const selectedSteps = ref(['keyframes', 'ocr', 'asr', 'vector', 'summary']);
+    
+    // 处理步骤选项
+    const processingSteps = ref([
+      {
+        value: 'keyframes',
+        label: '关键帧提取',
+        icon: 'mdi-image-multiple',
+        description: '提取视频关键帧用于封面和缩略图生成'
+      },
+      {
+        value: 'ocr',
+        label: 'OCR文字识别',
+        icon: 'mdi-text-recognition',
+        description: '识别视频中的文字内容，生成文本索引'
+      },
+      {
+        value: 'asr',
+        label: 'ASR语音识别',
+        icon: 'mdi-microphone',
+        description: '将视频中的语音转换为文字，生成字幕'
+      },
+      {
+        value: 'vector',
+        label: '向量化处理',
+        icon: 'mdi-vector-triangle',
+        description: '将文本内容向量化，用于语义搜索和问答'
+      },
+      {
+        value: 'summary',
+        label: '智能摘要',
+        icon: 'mdi-text-box-outline',
+        description: '生成视频内容的智能摘要和关键词'
+      }
+    ]);
 
     const fetchCourses = async () => {
       try {
@@ -143,9 +228,7 @@ export default {
           subtitle: matchingSubtitle || null
         };
       });
-    });
-
-    const uploadVideos = async () => {
+    });    const uploadVideos = async () => {
       if (!fileMatches.value.length || !selectedCourseId.value) {
         return;
       }
@@ -157,6 +240,9 @@ export default {
         const totalFiles = fileMatches.value.length;
         let completedFiles = 0;
 
+        // 准备处理步骤参数
+        const processingSteps = previewMode.value ? null : (selectedSteps.value.length > 0 ? selectedSteps.value : null);
+
         // 循环上传每个视频文件及其匹配的字幕
         for (const match of fileMatches.value) {
           await uploadService.uploadVideo(
@@ -165,6 +251,8 @@ export default {
             match.video.name.replace(/\.[^.]*$/, ''), // 去掉最后一个点及其后面的内容作为视频标题
             '', // 清空描述
             match.subtitle, // 传递匹配的字幕文件
+            processingSteps, // 处理步骤
+            previewMode.value, // 预览模式
             (progressEvent) => {
               // 计算总体进度
               if (progressEvent.lengthComputable) {
@@ -186,7 +274,8 @@ export default {
           allFiles.value = [];
           uploadProgress.value = 0;
           // 显示成功消息
-          alert('视频上传成功！');
+          const message = previewMode.value ? '视频上传成功！预览模式已生成处理日志。' : '视频上传成功！';
+          alert(message);
         }, 1000);
       } catch (error) {
         uploading.value = false;
@@ -197,15 +286,16 @@ export default {
 
     onMounted(() => {
       fetchCourses();
-    });
-
-    return {
+    });    return {
       courses,
       selectedCourseId,
       allFiles,
       fileMatches,
       uploading,
       uploadProgress,
+      previewMode,
+      selectedSteps,
+      processingSteps,
       uploadVideos
     };
   }

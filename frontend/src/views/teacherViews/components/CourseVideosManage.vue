@@ -399,6 +399,113 @@
         </v-card-actions>
       </v-card>    </v-dialog>
 
+    <!-- 视频处理设置对话框 -->
+    <v-dialog v-model="showProcessSettingsModal" max-width="600">
+      <v-card>
+        <v-card-title class="text-h5 pa-4">
+          视频处理设置
+          <v-spacer></v-spacer>
+          <v-btn icon @click="closeProcessSettingsDialog">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text class="pa-4">
+          <div v-if="processSettingsTarget === 'single'" class="mb-4">
+            <div class="text-body-1 mb-2">视频: {{ currentProcessVideo?.title }}</div>
+          </div>
+          <div v-else class="mb-4">
+            <div class="text-body-1 mb-2">批量处理 {{ selectedVideos.length }} 个视频</div>
+          </div>
+
+          <!-- 预览模式开关 -->
+          <div class="mb-4">
+            <v-switch
+              v-model="processPreviewMode"
+              color="primary"
+              label="预览模式"
+              hint="预览模式下将执行所有处理步骤但不保存到数据库，仅生成处理日志"
+              persistent-hint
+            ></v-switch>
+          </div>
+
+          <!-- 处理步骤选择 -->
+          <div class="mb-4">
+            <v-card-subtitle class="pa-0 mb-2">选择处理步骤</v-card-subtitle>
+            <v-checkbox-group v-model="processSelectedSteps" column>
+              <v-checkbox
+                v-for="step in processingSteps"
+                :key="step.value"
+                :value="step.value"
+                :label="step.label"
+                :disabled="processPreviewMode"
+                density="compact"
+              >
+                <template v-slot:label>
+                  <div class="d-flex align-center">
+                    <v-icon :icon="step.icon" class="mr-2" size="small"></v-icon>
+                    <span>{{ step.label }}</span>
+                    <v-tooltip activator="parent" location="top">
+                      {{ step.description }}
+                    </v-tooltip>
+                  </div>
+                </template>
+              </v-checkbox>
+            </v-checkbox-group>
+            <v-card-text class="pa-0 text-caption text-medium-emphasis" v-if="!processPreviewMode">
+              * 未选择步骤将跳过处理。已处理的步骤可以重新执行以更新数据。
+            </v-card-text>
+            <v-card-text class="pa-0 text-caption text-medium-emphasis" v-else>
+              * 预览模式下将执行所有步骤
+            </v-card-text>
+          </div>
+
+          <!-- 处理状态查询 -->
+          <div v-if="processSettingsTarget === 'single' && currentProcessVideo" class="mb-4">
+            <v-btn
+              variant="outlined"
+              size="small"
+              prepend-icon="mdi-information"
+              @click="checkVideoProcessingStatus"
+              :loading="checkingStatus"
+            >
+              查看当前处理状态
+            </v-btn>
+            
+            <div v-if="videoProcessingStatus" class="mt-3">
+              <v-card variant="outlined" class="pa-3">
+                <v-card-subtitle class="pa-0 mb-2">当前处理状态</v-card-subtitle>
+                <div v-for="(status, stepName) in videoProcessingStatus" :key="stepName" class="d-flex align-center mb-1">
+                  <v-icon 
+                    :color="status ? 'success' : 'grey'" 
+                    class="mr-2" 
+                    size="small"
+                  >
+                    {{ status ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                  </v-icon>
+                  <span :class="status ? 'text-success' : 'text-medium-emphasis'">
+                    {{ getStepDisplayName(stepName) }}
+                  </span>
+                </div>
+              </v-card>
+            </div>
+          </div>
+        </v-card-text>
+        <v-divider></v-divider>
+        <v-card-actions class="pa-4">
+          <v-spacer></v-spacer>
+          <v-btn variant="text" @click="closeProcessSettingsDialog">取消</v-btn>
+          <v-btn 
+            color="primary" 
+            @click="startProcessingWithSettings"
+            :disabled="!processPreviewMode && processSelectedSteps.length === 0"
+          >
+            {{ processPreviewMode ? '开始预览' : '开始处理' }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
   </v-container>
 </template>
 
@@ -434,6 +541,17 @@ const videoToDelete = ref(null);
 
 // 视频处理相关
 const processingVideoId = ref(null);
+const showProcessSettingsModal = ref(false);
+const processSettingsTarget = ref('single'); // 'single' 或 'batch'
+const processPreviewMode = ref(false);
+const processSelectedSteps = ref([]);
+const processingSteps = ref([
+  { value: 'keyframe_extraction', label: '提取关键帧', icon: 'mdi-image', description: '从视频中提取关键帧用于后续处理' },
+  { value: 'ocr', label: 'OCR文字识别', icon: 'mdi-text-recognition', description: '识别视频中的文字信息' },
+  { value: 'speech_recognition', label: '语音识别', icon: 'mdi-microphone', description: '识别视频中的语音内容' }
+]);
+const videoProcessingStatus = ref(null);
+const checkingStatus = ref(false);
 
 // 批量选择相关
 const selectedVideos = ref([]);
@@ -444,6 +562,49 @@ const batchProcessing = ref(false);
 const batchProgress = ref(0);
 const processedCount = ref(0);
 const processingStatus = ref([]);
+
+// 视频处理设置相关
+const showProcessSettingsModal = ref(false);
+const processSettingsTarget = ref('single'); // 'single' 或 'batch'
+const currentProcessVideo = ref(null);
+const processPreviewMode = ref(false);
+const processSelectedSteps = ref(['keyframes', 'ocr', 'asr', 'vector', 'summary']);
+const checkingStatus = ref(false);
+const videoProcessingStatus = ref(null);
+
+// 处理步骤选项
+const processingSteps = ref([
+  {
+    value: 'keyframes',
+    label: '关键帧提取',
+    icon: 'mdi-image-multiple',
+    description: '提取视频关键帧用于封面和缩略图生成'
+  },
+  {
+    value: 'ocr',
+    label: 'OCR文字识别',
+    icon: 'mdi-text-recognition',
+    description: '识别视频中的文字内容，生成文本索引'
+  },
+  {
+    value: 'asr',
+    label: 'ASR语音识别',
+    icon: 'mdi-microphone',
+    description: '将视频中的语音转换为文字，生成字幕'
+  },
+  {
+    value: 'vector',
+    label: '向量化处理',
+    icon: 'mdi-vector-triangle',
+    description: '将文本内容向量化，用于语义搜索和问答'
+  },
+  {
+    value: 'summary',
+    label: '智能摘要',
+    icon: 'mdi-text-box-outline',
+    description: '生成视频内容的智能摘要和关键词'
+  }
+]);
 
 // 知识图谱相关
 const knowledgeGraphLoading = ref(false);
@@ -765,25 +926,90 @@ const processVideo = async (video) => {
     return;
   }
   
-  if (!confirm(`确定要处理视频"${video.title}"吗？\n处理包括：提取关键帧、OCR文字识别、语音识别等步骤，可能需要一些时间。`)) {
-    return;
-  }
+  // 显示处理设置对话框
+  currentProcessVideo.value = video;
+  processSettingsTarget.value = 'single';
+  showProcessSettingsModal.value = true;
+};
+
+// 获取步骤显示名称
+const getStepDisplayName = (stepName) => {
+  const stepMap = {
+    keyframes: '关键帧提取',
+    ocr: 'OCR文字识别',
+    asr: 'ASR语音识别',
+    vector: '向量化处理',
+    summary: '智能摘要'
+  };
+  return stepMap[stepName] || stepName;
+};
+
+// 检查视频处理状态
+const checkVideoProcessingStatus = async () => {
+  if (!currentProcessVideo.value) return;
   
+  checkingStatus.value = true;
+  try {
+    const response = await videoService.getVideoProcessingStatus(currentProcessVideo.value.id);
+    if (response.data && response.data.code === 200) {
+      videoProcessingStatus.value = response.data.data;
+    } else {
+      throw new Error(response.data.message || '获取处理状态失败');
+    }
+  } catch (error) {
+    console.error('获取视频处理状态失败:', error);
+    alert('获取视频处理状态失败: ' + (error.message || '未知错误'));
+  } finally {
+    checkingStatus.value = false;
+  }
+};
+
+// 关闭处理设置对话框
+const closeProcessSettingsDialog = () => {
+  showProcessSettingsModal.value = false;
+  currentProcessVideo.value = null;
+  videoProcessingStatus.value = null;
+  processPreviewMode.value = false;
+  processSelectedSteps.value = ['keyframes', 'ocr', 'asr', 'vector', 'summary'];
+};
+
+// 开始处理（根据设置）
+const startProcessingWithSettings = async () => {
+  if (processSettingsTarget.value === 'single') {
+    await processSingleVideoWithSettings();
+  } else {
+    await processBatchVideosWithSettings();
+  }
+  closeProcessSettingsDialog();
+};
+
+// 单个视频处理（带设置）
+const processSingleVideoWithSettings = async () => {
+  if (!currentProcessVideo.value) return;
+  
+  const video = currentProcessVideo.value;
   processingVideoId.value = video.id;
   
   try {
-    const response = await videoService.processVideo(video.id);
+    const requestData = {
+      processing_steps: processPreviewMode.value ? null : (processSelectedSteps.value.length > 0 ? processSelectedSteps.value : null),
+      preview_mode: processPreviewMode.value
+    };
+    
+    const response = await videoService.processVideoWithSettings(video.id, requestData);
     
     if (response.data && response.data.code === 200) {
-      // 更新成功
-      alert('视频处理任务已成功创建，系统将在后台进行视频分析处理，完成后可用于智能问答。');
+      const message = processPreviewMode.value 
+        ? '视频预览处理任务已成功创建，将生成处理日志但不保存到数据库。'
+        : '视频处理任务已成功创建，系统将在后台进行视频分析处理，完成后可用于智能问答。';
+      alert(message);
       
       // 更新本地数据
       const index = videos.value.findIndex(v => v.id === video.id);
       if (index !== -1) {
         videos.value[index] = {
           ...videos.value[index],
-          processed: true // 假设后端返回了processed字段，表示视频是否已处理
+          processed: !processPreviewMode.value // 预览模式不算真正处理完成
         };
       }
       
@@ -800,112 +1026,32 @@ const processVideo = async (video) => {
   }
 };
 
-// 确认批量处理
-const confirmBatchProcess = () => {
+// 批量处理视频（带设置）
+const processBatchVideosWithSettings = async () => {
   if (selectedVideos.value.length === 0) {
     alert('请先选择要处理的视频');
     return;
   }
-  // 确认用户选择的是哪些视频
-  const selectedVideoTitles = filteredVideos.value
-    .filter(v => selectedVideos.value.includes(v.id))
-    .map(v => v.title);
-  
-  showBatchProcessModal.value = true;
-};
-
-// 关闭批量处理对话框
-const closeBatchProcessDialog = () => {
-  showBatchProcessModal.value = false;
-};
-
-// 关闭批量处理进度对话框
-const closeBatchProgressDialog = () => {
-  if (batchProcessing.value) {
-    return; // 如果正在处理中，不允许关闭
-  }
-  
-  showBatchProgressModal.value = false;
-  // 刷新视频列表
-  fetchVideos();
-};
-
-// 确认批量删除
-const confirmBatchDelete = () => {
-  if (selectedVideos.value.length === 0) {
-    alert('请先选择要解除关联的视频');
-    return;
-  }
-  showBatchDeleteModal.value = true;
-};
-
-// 关闭批量删除对话框
-const closeBatchDeleteDialog = () => {
-  showBatchDeleteModal.value = false;
-};
-
-// 批量删除视频
-const batchDeleteVideos = async () => {
-  if (selectedVideos.value.length === 0) {
-    alert('请先选择要解除关联的视频');
-    return;
-  }
-  
-  batchProcessing.value = true;
-  
-  try {
-    const deletePromises = selectedVideos.value.map(videoId => 
-      videoService.deleteVideo(videoId)
-    );
-    
-    await Promise.all(deletePromises);
-    
-    // 从列表中移除
-    videos.value = videos.value.filter(v => !selectedVideos.value.includes(v.id));
-    
-    // 更新筛选结果
-    filterVideos();
-    
-    // 清空选中列表
-    selectedVideos.value = [];
-    
-    // 关闭对话框
-    closeBatchDeleteDialog();
-    
-    alert('视频已成功批量解除关联');
-  } catch (error) {
-    console.error('批量解除视频关联失败:', error);
-    alert('批量解除视频关联失败: ' + (error.message || '未知错误'));
-  } finally {
-    batchProcessing.value = false;
-  }
-};  // 批量处理视频
-const batchProcessVideos = async () => {
-  if (selectedVideos.value.length === 0) {
-    alert('请先选择要处理的视频');
-    return;
-  }
-  
-  // 关闭确认对话框
-  showBatchProcessModal.value = false;
   
   // 显示进度对话框
   showBatchProgressModal.value = true;
   batchProcessing.value = true;
   batchProgress.value = 0;
   processedCount.value = 0;
+  
+  const processingType = processPreviewMode.value ? '预览处理' : '处理';
   processingStatus.value = [
     {
       icon: 'mdi-information-outline',
       color: 'info',
       textClass: 'text-info',
-      message: '正在启动批量处理任务...'
+      message: `正在启动批量${processingType}任务...`
     }
   ];
   
   const totalVideos = selectedVideos.value.length;
   const videoQueue = [...selectedVideos.value];
-  const videoStatus = new Map(); // 跟踪每个视频的处理状态
+  const videoStatus = new Map();
   
   // 更新处理状态显示
   const updateProcessingStatus = () => {
@@ -953,7 +1099,7 @@ const batchProcessVideos = async () => {
         icon: 'mdi-timer-sand',
         color: 'grey',
         textClass: 'text-medium-emphasis',
-        message: `${videoQueue.length} 个视频等待处理...`
+        message: `${videoQueue.length} 个视频等待${processingType}...`
       });
     }
     
@@ -968,19 +1114,24 @@ const batchProcessVideos = async () => {
     // 更新当前处理状态
     videoStatus.set('current', {
       status: 'processing',
-      message: `处理中：${videoTitle} (${i + 1}/${totalVideos})`
+      message: `${processingType}中：${videoTitle} (${i + 1}/${totalVideos})`
     });
     
     updateProcessingStatus();
     
     try {
-      const response = await videoService.processVideo(videoId);
+      const requestData = {
+        processing_steps: processPreviewMode.value ? null : (processSelectedSteps.value.length > 0 ? processSelectedSteps.value : null),
+        preview_mode: processPreviewMode.value
+      };
+      
+      const response = await videoService.processVideoWithSettings(videoId, requestData);
       
       if (response.data && response.data.code === 200) {
         // 处理成功
         videoStatus.set(videoId, {
           status: 'success',
-          message: `处理成功：${videoTitle}`
+          message: `${processingType}成功：${videoTitle}`
         });
         
         // 更新进度
@@ -990,14 +1141,14 @@ const batchProcessVideos = async () => {
         // 处理失败
         videoStatus.set(videoId, {
           status: 'error',
-          message: `处理失败：${videoTitle} - ${response.data.message || '未知错误'}`
+          message: `${processingType}失败：${videoTitle} - ${response.data.message || '未知错误'}`
         });
       }
     } catch (error) {
-      console.error('处理视频失败:', error);
+      console.error(`${processingType}视频失败:`, error);
       videoStatus.set(videoId, {
         status: 'error',
-        message: `处理失败：${videoTitle} - ${error.message || '未知错误'}`
+        message: `${processingType}失败：${videoTitle} - ${error.message || '未知错误'}`
       });
     }
     
@@ -1012,7 +1163,7 @@ const batchProcessVideos = async () => {
     icon: 'mdi-check-circle',
     color: 'success',
     textClass: 'text-success',
-    message: `批量处理完成，共处理 ${processedCount.value} 个视频`
+    message: `批量${processingType}完成，共${processingType} ${processedCount.value} 个视频`
   });
   
   updateProcessingStatus();

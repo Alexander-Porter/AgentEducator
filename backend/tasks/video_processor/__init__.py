@@ -9,7 +9,7 @@ from .asr_processor import ASRProcessor
 from .vector_indexer import build_vector_index, check_vector_index_exists
 from .summary_generator import generate_video_summary, generate_section_summary, group_keyframes_into_sections
 from .cache_manager import get_section_cache_key, check_section_cache, save_section_cache
-from .db_handler import save_keyframes_to_db, load_keyframes_from_db, check_video_summary_exists
+from .db_handler import save_keyframes_to_db, load_keyframes_from_db, check_video_summary_exists, check_video_processing_steps_status
 from .task_logger import add_task_log
 from .main_processor import process_video_task
 
@@ -25,10 +25,10 @@ __all__ = [
     'group_keyframes_into_sections',
     'get_section_cache_key',
     'check_section_cache',
-    'save_section_cache',
-    'save_keyframes_to_db',
+    'save_section_cache',    'save_keyframes_to_db',
     'load_keyframes_from_db',
     'check_video_summary_exists',
+    'check_video_processing_steps_status',
     'add_task_log',
     'process_video_task'
 ]

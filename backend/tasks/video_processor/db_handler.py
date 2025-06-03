@@ -138,3 +138,73 @@ def check_video_summary_exists(video_id):
     except Exception as e:
         current_app.logger.error(f"检查视频摘要失败: {str(e)}")
         return False, None
+
+def check_video_processing_steps_status(video_id):
+    """
+    检查视频各个处理步骤的完成状态
+    
+    参数:
+        video_id: 视频ID
+        
+    返回:
+        dict: 各步骤的完成状态
+        {
+            "keyframes": bool,  # 关键帧提取是否完成
+            "ocr": bool,        # OCR识别是否完成
+            "asr": bool,        # ASR语音识别是否完成
+            "vector": bool,     # 向量索引构建是否完成
+            "summary": bool     # 视频摘要生成是否完成
+        }
+    """
+    try:
+        status = {
+            "keyframes": False,
+            "ocr": False,
+            "asr": False,
+            "vector": False,
+            "summary": False
+        }
+        
+        # 检查关键帧提取
+        keyframes_count = VideoKeyframe.query.filter_by(video_id=video_id).count()
+        if keyframes_count > 0:
+            status["keyframes"] = True
+            
+            # 检查OCR处理 - 随机检查几个关键帧是否有OCR结果
+            sample_keyframes = VideoKeyframe.query.filter_by(video_id=video_id).limit(3).all()
+            ocr_completed = False
+            for kf in sample_keyframes:
+                try:
+                    ocr_result = kf.get_ocr_result()
+                    if ocr_result and len(ocr_result) > 0:
+                        ocr_completed = True
+                        break
+                except:
+                    pass
+            status["ocr"] = ocr_completed
+            
+            # 检查ASR处理 - 检查是否有关键帧包含ASR文本
+            asr_count = VideoKeyframe.query.filter_by(video_id=video_id).filter(
+                VideoKeyframe.asr_texts != None,
+                VideoKeyframe.asr_texts != ""
+            ).count()
+            status["asr"] = asr_count > 0
+        
+        # 检查向量索引
+        vector_index = VideoVectorIndex.query.filter_by(video_id=video_id).first()
+        status["vector"] = vector_index is not None
+        
+        # 检查视频摘要
+        summary = VideoSummary.query.filter_by(video_id=video_id).first()
+        status["summary"] = summary is not None
+        
+        return status
+    except Exception as e:
+        current_app.logger.error(f"检查视频处理状态失败: {str(e)}")
+        return {
+            "keyframes": False,
+            "ocr": False, 
+            "asr": False,
+            "vector": False,
+            "summary": False
+        }

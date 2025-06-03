@@ -11,8 +11,17 @@ export default {
       }
     });
   },
-
-  uploadVideo(file: File, courseId: string, title?: string, description?: string, jsonSub?: File, onProgress?: (progressEvent: any) => void, signal?: AbortSignal) {
+  uploadVideo(
+    file: File, 
+    courseId: string, 
+    title?: string, 
+    description?: string, 
+    jsonSub?: File, 
+    processingSteps?: string[] | null,
+    previewMode?: boolean,
+    onProgress?: (progressEvent: any) => void, 
+    signal?: AbortSignal
+  ) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('courseId', courseId); // 添加课程ID
@@ -24,6 +33,16 @@ export default {
     
     if (jsonSub) {
       formData.append('json_sub', jsonSub); // 可选的字幕JSON文件
+    }
+    
+    // 添加处理步骤参数
+    if (processingSteps && processingSteps.length > 0) {
+      formData.append('processingSteps', JSON.stringify(processingSteps));
+    }
+    
+    // 添加预览模式参数
+    if (previewMode !== undefined) {
+      formData.append('previewMode', previewMode.toString());
     }
     
     return apiClient.post('/api/uploads/course_video', formData, {

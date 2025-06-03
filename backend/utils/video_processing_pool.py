@@ -25,7 +25,6 @@ class VideoProcessingPool:
             thread = threading.Thread(target=self._worker_thread, daemon=True)
             thread.start()
             self.worker_threads.append(thread)
-    
     def _worker_thread(self):
         """工作线程函数，不断从队列中获取任务并执行"""
         while self.running:
@@ -34,9 +33,19 @@ class VideoProcessingPool:
                 task = self.task_queue.get(timeout=1)
                 if task is None:  # 收到停止信号
                     break
-                    
-                # 执行任务
-                app, video_id, task_id, stop_flag, process_func = task
+                
+                # 解析任务参数，支持新旧两种格式
+                if len(task) == 5:
+                    # 旧格式：兼容现有代码
+                    app, video_id, task_id, stop_flag, process_func = task
+                    processing_steps = None
+                    preview_mode = False
+                elif len(task) == 7:
+                    # 新格式：支持新参数
+                    app, video_id, task_id, stop_flag, process_func, processing_steps, preview_mode = task
+                else:
+                    current_app.logger.error(f"无效的任务参数格式: {task}")
+                    continue
                 
                 # 添加到当前任务列表
                 self.current_tasks[task_id] = {
@@ -69,8 +78,8 @@ class VideoProcessingPool:
                                 'stop_flag': stop_flag
                             }
                         
-                        # 执行处理函数
-                        process_func(video_id, stop_flag)
+                        # 执行处理函数，传递新参数
+                        process_func(video_id, stop_flag, processing_steps, preview_mode)
                 except Exception as e:
                     import traceback
                     traceback.print_exc()
@@ -122,6 +131,32 @@ class VideoProcessingPool:
         
         return task_id, stop_flag
     
+    def submit_task_with_params(self, app, video_id, process_func, processing_steps=None, preview_mode=False):
+        """
+        提交视频处理任务（支持参数）
+        
+        Args:
+            app: Flask应用实例
+            video_id: 视频ID
+            process_func: 处理函数
+            processing_steps: 要执行的步骤列表
+            preview_mode: 预览模式
+            
+        Returns:
+            task_id: 任务ID
+            stop_flag: 停止标志
+        """
+        # 生成任务ID
+        task_id = f"task-{uuid.uuid4().hex[:8]}"
+        
+        # 创建停止标志
+        stop_flag = threading.Event()
+        
+        # 添加到队列，包含额外参数
+        self.task_queue.put((app, video_id, task_id, stop_flag, process_func, processing_steps, preview_mode))
+        
+        return task_id, stop_flag
+
     def get_pending_tasks_count(self):
         """获取等待中的任务数量"""
         return self.task_queue.qsize()

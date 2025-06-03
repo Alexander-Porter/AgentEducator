@@ -771,6 +771,9 @@ def update_video(video_id):
 def process_video(video_id):
     """
     手动触发视频处理任务的接口，包括关键帧提取、OCR、ASR等处理
+    支持参数：
+    - processing_steps: 要执行的步骤列表 (可选，默认全部)
+    - preview_mode: 预览模式 (可选，默认false)
     """
     try:
         # 检查权限
@@ -793,51 +796,116 @@ def process_video(video_id):
             if course and str(course.teacher_id) != str(user_id) and not Users.query.get(user_id).role == 'admin':
                 return jsonify(Result.error(403, "无权处理他人创建的课程视频"))
         
-        # 检查是否存在正在进行的处理任务
-        existing_task = VideoProcessingTask.query.filter_by(
-            video_id=video_id, 
-            status='processing'
-        ).first()
+        # 获取请求参数
+        data = request.get_json() or {}
+        processing_steps = data.get('processing_steps')  # 可选参数，默认为None（全部步骤）
+        preview_mode = data.get('preview_mode', False)  # 默认为False
         
-        if existing_task:
-            return jsonify(Result.error(400, "该视频已有处理任务正在进行中"))
-              # 导入处理函数并在后台线程中运行
+        # 验证processing_steps参数
+        valid_steps = ["keyframes", "ocr", "asr", "vector", "summary"]
+        if processing_steps is not None:
+            if not isinstance(processing_steps, list):
+                return jsonify(Result.error(400, "processing_steps参数必须是数组"))
+            for step in processing_steps:
+                if step not in valid_steps:
+                    return jsonify(Result.error(400, f"无效的处理步骤: {step}，有效步骤: {valid_steps}"))
+        
+        # 检查是否存在正在进行的处理任务（非预览模式才检查）
+        if not preview_mode:
+            existing_task = VideoProcessingTask.query.filter_by(
+                video_id=video_id, 
+                status='processing'
+            ).first()
+            
+            if existing_task:
+                return jsonify(Result.error(400, "该视频已有处理任务正在进行中"))
+        
+        # 导入处理函数并在后台线程中运行
         from tasks.video_processor.main_processor import process_video_task
         import threading
         from models.models import TaskLog
         from utils.video_processing_pool import video_processing_pool
         
-        # 创建视频处理任务
+        # 创建视频处理任务（非预览模式）
         task_id = f"task-{uuid.uuid4().hex[:8]}"
-        task = VideoProcessingTask(
-            video_id=video.id,
-            task_id=task_id,
-            status="pending",
-            processing_type="all",
-            progress=0.0,
-            start_time=datetime.now()
-        )
-        db.session.add(task)
-        db.session.commit()
+        if not preview_mode:
+            processing_type = ",".join(processing_steps) if processing_steps else "all"
+            task = VideoProcessingTask(
+                video_id=video.id,
+                task_id=task_id,
+                status="pending",
+                processing_type=processing_type,
+                progress=0.0,
+                start_time=datetime.now()
+            )
+            db.session.add(task)
+            db.session.commit()
         
         # 提交任务到线程池处理，不阻塞HTTP响应
-        task_id, stop_flag = video_processing_pool.submit_task(
+        # 需要修改video_processing_pool以支持新参数
+        task_id, stop_flag = video_processing_pool.submit_task_with_params(
             current_app._get_current_object(), 
             video.id, 
-            process_video_task
+            process_video_task,
+            processing_steps=processing_steps,
+            preview_mode=preview_mode
         )
         
-        # 更新任务ID（如果线程池生成了新的ID）
-        if task.task_id != task_id:
+        # 更新任务ID（如果线程池生成了新的ID且非预览模式）
+        if not preview_mode and task.task_id != task_id:
             task.task_id = task_id
             db.session.commit()
         
-        return jsonify(Result.success({
+        result_data = {
             "taskId": task_id,
             "pendingTasks": video_processing_pool.get_pending_tasks_count(),
-            "activeTasks": video_processing_pool.get_active_tasks_count()
-        }, "视频处理任务已启动"))
+            "activeTasks": video_processing_pool.get_active_tasks_count(),
+            "previewMode": preview_mode
+        }
+        
+        if processing_steps:
+            result_data["processingSteps"] = processing_steps
+        
+        message = "视频预览处理任务已启动" if preview_mode else "视频处理任务已启动"
+        return jsonify(Result.success(result_data, message))
         
     except Exception as e:
         current_app.logger.error(f"启动视频处理任务失败: {str(e)}")
         return jsonify(Result.error(500, f"启动视频处理任务失败: {str(e)}"))
+
+@video_bp.route('/<video_id>/processing-status', methods=['GET'])
+@token_required
+def get_video_processing_status(video_id):
+    """
+    获取视频处理步骤状态的接口
+    """
+    try:
+        # 检查权限
+        user_id = request.user.get('user_id')
+        if not is_teacher_or_admin(user_id):
+            return jsonify(Result.error(403, "无权操作，需要教师或管理员权限"))
+            
+        # 查找视频
+        video = Video.query.get(video_id)
+        if not video:
+            return jsonify(Result.error(404, "视频不存在"))
+            
+        # 检查视频是否已删除
+        if video.is_deleted:
+            return jsonify(Result.error(400, "视频已被删除"))
+            
+        # 如果视频属于课程，确认是否有权限
+        if video.course_id:
+            course = Course.query.get(video.course_id)
+            if course and str(course.teacher_id) != str(user_id) and not Users.query.get(user_id).role == 'admin':
+                return jsonify(Result.error(403, "无权查看他人创建的课程视频状态"))
+        
+        # 获取处理状态
+        from tasks.video_processor.db_handler import check_video_processing_steps_status
+        status = check_video_processing_steps_status(video_id)
+        
+        return jsonify(Result.success(status, "获取视频处理状态成功"))
+        
+    except Exception as e:
+        current_app.logger.error(f"获取视频处理状态失败: {str(e)}")
+        return jsonify(Result.error(500, f"获取视频处理状态失败: {str(e)}"))
