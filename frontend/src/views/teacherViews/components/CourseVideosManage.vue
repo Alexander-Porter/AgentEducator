@@ -539,18 +539,7 @@ const videoEdit = reactive({
 const showDeleteModal = ref(false);
 const videoToDelete = ref(null);
 
-// 视频处理相关
-const processingVideoId = ref(null);
-const showProcessSettingsModal = ref(false);
-const processSettingsTarget = ref('single'); // 'single' 或 'batch'
-const processPreviewMode = ref(false);
-const processSelectedSteps = ref([]);
-const processingSteps = ref([
-  { value: 'keyframe_extraction', label: '提取关键帧', icon: 'mdi-image', description: '从视频中提取关键帧用于后续处理' },
-  { value: 'ocr', label: 'OCR文字识别', icon: 'mdi-text-recognition', description: '识别视频中的文字信息' },
-  { value: 'speech_recognition', label: '语音识别', icon: 'mdi-microphone', description: '识别视频中的语音内容' }
-]);
-const videoProcessingStatus = ref(null);
+
 const checkingStatus = ref(false);
 
 // 批量选择相关
